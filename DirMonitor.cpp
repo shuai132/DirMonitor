@@ -6,7 +6,7 @@
 #include "DirMonitor.h"
 #include "log.h"
 
-DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle)
+DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Scheduler& scheduler)
     : monitorDir_(std::move(monitorDir)),
     onFileHandle_(std::move(handle)) {
 
@@ -14,7 +14,7 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle)
         monitorDir_ += "/";
     }
 
-    monitorThread_ = std::unique_ptr<std::thread>(new std::thread([this] {
+    monitorThread_ = std::unique_ptr<std::thread>(new std::thread([this, scheduler] {
         LOGD("start monitor dir: %s", monitorDir_.c_str());
         for(; running_; std::this_thread::sleep_for(std::chrono::seconds(1))) {
             const auto& before = paths_;
@@ -48,17 +48,24 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle)
             std::set_difference(before.cbegin(), before.cend(), intersection.cbegin(), intersection.cend(),
                     std::inserter<GatherType>(gatherRemoved, gatherRemoved.begin()));
 
+            auto cb = [this, &scheduler](DirEvent::Event event, std::string path) {
+                if (onFileHandle_) {
+                    if (scheduler) {
+                        scheduler([=]{
+                            onFileHandle_(DirEvent {event, monitorDir_ + path});
+                        });
+                    } else {
+                        onFileHandle_(DirEvent {event, monitorDir_ + path});
+                    }
+                }
+            };
             for (const auto& path : gatherAdded) {
                 LOGD("gatherAdded.size()=%zu", gatherAdded.size());
-                if (onFileHandle_) {
-                    onFileHandle_(DirEvent {DirEvent::ADD, monitorDir_ + path});
-                }
+                cb(DirEvent::ADD, path);
             }
             for (const auto& path : gatherRemoved) {
                 LOGD("gatherRemoved.size()=%zu", gatherRemoved.size());
-                if (onFileHandle_) {
-                    onFileHandle_(DirEvent {DirEvent::REMOVE, monitorDir_ + path});
-                }
+                cb(DirEvent::REMOVE, path);
             }
 
             paths_.swap(current);

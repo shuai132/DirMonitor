@@ -25,11 +25,11 @@ struct DirEvent {
 };
 
 class DirMonitor {
-public:
     using OnFileHandle = std::function<void(DirEvent event)>;
+    using Scheduler = std::function<void(std::function<void()>)>;
 
 public:
-    DirMonitor(std::string monitorDir, OnFileHandle handle);
+    DirMonitor(std::string monitorDir, OnFileHandle handle, const Scheduler& scheduler = nullptr);
     ~DirMonitor();
 
 public:
