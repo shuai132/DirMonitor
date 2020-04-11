@@ -3,6 +3,13 @@
 
 #include <dirent.h>
 
+#if __WIN32
+#include <windows.h>
+#define FILE_SEPARATOR '\\'
+#else
+#define FILE_SEPARATOR '/'
+#endif
+
 #include "DirMonitor.h"
 #include "log.h"
 
@@ -10,8 +17,8 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
     : monitorDir_(std::move(monitorDir)),
     onFileHandle_(std::move(handle)) {
 
-    if (monitorDir_[monitorDir_.length() - 1] != '/') {
-        monitorDir_ += "/";
+    if (monitorDir_[monitorDir_.length() - 1] != FILE_SEPARATOR) {
+        monitorDir_ += FILE_SEPARATOR;
     }
 
     monitorThread_ = std::unique_ptr<std::thread>(new std::thread([this, scheduler] {
@@ -28,7 +35,15 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
             while (true) {
                 auto p = readdir(dir);
                 if (p == nullptr) break;
-                if (p->d_type != DT_DIR) continue;
+                auto isDir = [&]{
+                #if __WIN32
+                    auto attr = GetFileAttributes(p->d_name);
+                    return attr & FILE_ATTRIBUTE_DIRECTORY; // NOLINT(hicpp-signed-bitwise)
+                #else
+                    return p->d_type == DT_DIR;
+                #endif
+                };
+                if (not isDir()) continue;
 
                 std::string dirName(p->d_name);
                 if (dirName == "." || dirName == "..") continue;
@@ -48,7 +63,7 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
             std::set_difference(before.cbegin(), before.cend(), intersection.cbegin(), intersection.cend(),
                     std::inserter<GatherType>(gatherRemoved, gatherRemoved.begin()));
 
-            auto cb = [this, &scheduler](DirEvent::Event event, std::string path) {
+            auto cb = [this, &scheduler](DirEvent::Event event, const std::string& path) {
                 if (onFileHandle_) {
                     if (scheduler) {
                         scheduler([=]{
