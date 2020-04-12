@@ -6,36 +6,38 @@
 #include <string>
 #include <set>
 
-struct DirEvent {
-    enum Event {
-        REMOVE = 0,
-        ADD    = 1,
-    };
-    Event event;
-    std::string path;
+namespace DirMonitor {
 
-    static const char* getEventName(const Event& e) {
-        switch (e) {
-            case Event::ADD:
-                return "add";
-            case Event::REMOVE:
-                return "remove";
-        }
+struct Path {
+    std::string name;
+    bool isDir;
+
+    bool operator<(const Path& e) const {
+        return name < e.name;
     }
 };
 
-class DirMonitor {
-    using OnFileHandle = std::function<void(DirEvent event)>;
+struct Event {
+    enum Type {
+        REMOVE = 0,
+        ADD    = 1,
+    };
+    Type type;
+    Path path;
+};
+
+class Monitor {
+    using OnFileHandle = std::function<void(Event event)>;
     using Scheduler = std::function<void(std::function<void()>)>;
 
 public:
-    DirMonitor(std::string monitorDir, OnFileHandle handle, const Scheduler& scheduler = nullptr);
-    ~DirMonitor();
+    Monitor(std::string monitorDir, OnFileHandle handle, const Scheduler& scheduler = nullptr);
+    ~Monitor();
 
 public:
     // noncopyable
-    DirMonitor(const DirMonitor&) = delete;
-    void operator=(const DirMonitor&) = delete;
+    Monitor(const Monitor&) = delete;
+    void operator=(const Monitor&) = delete;
 
 private:
     std::string monitorDir_;
@@ -45,6 +47,7 @@ private:
     std::unique_ptr<std::thread> monitorThread_;
     std::atomic_bool running_ { true };
 
-    std::set<std::string> paths_;
+    std::set<Path> paths_;
 };
 
+}

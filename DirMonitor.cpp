@@ -13,7 +13,9 @@
 #include "DirMonitor.h"
 #include "log.h"
 
-DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Scheduler& scheduler)
+namespace DirMonitor {
+
+Monitor::Monitor(std::string monitorDir, OnFileHandle handle, const Scheduler& scheduler)
     : monitorDir_(std::move(monitorDir)),
     onFileHandle_(std::move(handle)) {
 
@@ -26,7 +28,7 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
         for(; running_; std::this_thread::sleep_for(std::chrono::seconds(1))) {
             const auto& before = paths_;
 
-            using GatherType = std::set<std::string>;
+            using GatherType = std::set<Path>;
             GatherType current;
 
             auto dir = opendir(monitorDir_.c_str());
@@ -35,20 +37,19 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
             while (true) {
                 auto p = readdir(dir);
                 if (p == nullptr) break;
-                auto isDir = [&]{
+                bool isDir = [&]{
                 #if __WIN32
                     auto attr = GetFileAttributes(p->d_name);
                     return attr & FILE_ATTRIBUTE_DIRECTORY; // NOLINT(hicpp-signed-bitwise)
                 #else
                     return p->d_type == DT_DIR;
                 #endif
-                };
-                if (not isDir()) continue;
+                }();
 
                 std::string dirName(p->d_name);
                 if (dirName == "." || dirName == "..") continue;
 
-                current.insert(std::move(dirName));
+                current.insert(Path{monitorDir_ + dirName, isDir});
             }
             closedir(dir);
 
@@ -63,24 +64,24 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
             std::set_difference(before.cbegin(), before.cend(), intersection.cbegin(), intersection.cend(),
                     std::inserter<GatherType>(gatherRemoved, gatherRemoved.begin()));
 
-            auto cb = [this, &scheduler](DirEvent::Event event, const std::string& path) {
+            auto cb = [this, &scheduler](Event::Type event, const Path& path) {
                 if (onFileHandle_) {
                     if (scheduler) {
                         scheduler([=]{
-                            onFileHandle_(DirEvent {event, monitorDir_ + path});
+                            onFileHandle_(Event {event, path});
                         });
                     } else {
-                        onFileHandle_(DirEvent {event, monitorDir_ + path});
+                        onFileHandle_(Event {event, path});
                     }
                 }
             };
             for (const auto& path : gatherAdded) {
                 LOGD("gatherAdded.size()=%zu", gatherAdded.size());
-                cb(DirEvent::ADD, path);
+                cb(Event::ADD, path);
             }
             for (const auto& path : gatherRemoved) {
                 LOGD("gatherRemoved.size()=%zu", gatherRemoved.size());
-                cb(DirEvent::REMOVE, path);
+                cb(Event::REMOVE, path);
             }
 
             paths_.swap(current);
@@ -88,7 +89,9 @@ DirMonitor::DirMonitor(std::string monitorDir, OnFileHandle handle, const Schedu
     }));
 }
 
-DirMonitor::~DirMonitor() {
+Monitor::~Monitor() {
     running_ = false;
     monitorThread_->join();
+}
+
 }
